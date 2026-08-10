@@ -3,13 +3,15 @@ ML Classifier — TF-IDF + Logistic Regression
 Classifies college emails/messages into 4 categories.
 Lightweight enough to run in 256MB RAM (Fly.io free tier).
 """
-import joblib
-import os
-import logging
-from sklearn.pipeline import Pipeline
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
-from sklearn.multiclass import OneVsRestClassifier
+try:
+    import joblib
+    from sklearn.pipeline import Pipeline
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
+    joblib = None
+    Pipeline = None
+
 from core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -82,8 +84,10 @@ def score_urgency(text: str, deadline=None) -> str:
     return "low"
 
 
-def load_model() -> Pipeline | None:
+def load_model():
     """Load trained model from disk. Returns None if not trained yet."""
+    if not HAS_SKLEARN or joblib is None:
+        return None
     clf_path = settings.ML_CLASSIFIER_PATH
     if os.path.exists(clf_path):
         return joblib.load(clf_path)
