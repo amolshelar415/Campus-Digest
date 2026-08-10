@@ -2,12 +2,34 @@
 Messages API Router
 Handles: list, get, mark read, dismiss, search, feedback
 """
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from core.db import db_select, db_update, db_insert, get_db
 from core.dependencies import get_current_user
 from core.cache import cache_get, cache_set, cache_delete
-import json
+import re, html as html_lib, json
+
+
+def _strip_html(raw: str) -> str:
+    """Remove HTML tags and decode HTML entities to plain text."""
+    if not raw:
+        return ""
+    text = html_lib.unescape(raw)
+    text = re.sub(r"<(style|script)[^>]*>.*?</\1>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<(br|p|div|li|tr|h[1-6])[^>]*>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    return text.strip()
+
+
+def _clean_msg(msg: dict) -> dict:
+    """Strip HTML from body_text for display."""
+    body = msg.get("body_text", "")
+    if body and ("<" in body and ">" in body):
+        msg = dict(msg)
+        msg["body_text"] = _strip_html(body)
+    return msg
 
 router = APIRouter()
 
@@ -51,7 +73,7 @@ async def list_messages(
         query = query.or_(f"subject.ilike.%{search}%,sender.ilike.%{search}%")
 
     result = query.execute()
-    data = result.data or []
+    data = [_clean_msg(m) for m in (result.data or [])]
 
     await cache_set(cache_key, json.dumps(data, default=str), ttl_seconds=60)
     return data
@@ -69,7 +91,7 @@ async def get_board(user: dict = Depends(get_current_user)):
               .limit(100)
               .execute())
 
-    messages = result.data or []
+    messages = [_clean_msg(m) for m in (result.data or [])]
     board = {"today": [], "week": [], "later": [], "flagged": []}
     for msg in messages:
         cat = msg.get("category")

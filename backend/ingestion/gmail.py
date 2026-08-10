@@ -1,9 +1,7 @@
 """
-Gmail Ingestion Module
-Fetches unread emails from a user's college Gmail account via Gmail API.
-Uses stored OAuth tokens (encrypted in Supabase).
+Gmail Ingestion Module — with HTML stripping
 """
-import json
+import json, re, html
 from datetime import datetime, timezone
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -23,7 +21,6 @@ SCOPES = [
 
 
 def _build_credentials(token_data: dict) -> Credentials:
-    """Reconstruct Google Credentials from stored token dict."""
     return Credentials(
         token=token_data.get("access_token"),
         refresh_token=token_data.get("refresh_token"),
@@ -34,21 +31,61 @@ def _build_credentials(token_data: dict) -> Credentials:
     )
 
 
+def _strip_html(raw: str) -> str:
+    """Remove HTML tags and decode HTML entities to clean plain text."""
+    if not raw:
+        return ""
+    # Decode HTML entities first
+    text = html.unescape(raw)
+    # Remove <style> and <script> blocks entirely
+    text = re.sub(r"<(style|script)[^>]*>.*?</\1>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+    # Replace <br>, <p>, <div>, <li> with newlines
+    text = re.sub(r"<(br|p|div|li|tr)[^>]*>", "\n", text, flags=re.IGNORECASE)
+    # Remove all remaining HTML tags
+    text = re.sub(r"<[^>]+>", "", text)
+    # Collapse multiple blank lines / excess whitespace
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    return text.strip()
+
+
 def _decode_body(payload: dict) -> str:
-    """Extract plain text body from Gmail message payload."""
-    body = ""
+    """Extract plain text body from Gmail message payload, stripping HTML."""
+    plain_body = ""
+    html_body = ""
+
+    def _walk(part: dict):
+        nonlocal plain_body, html_body
+        mime = part.get("mimeType", "")
+        if mime == "text/plain":
+            data = part.get("body", {}).get("data", "")
+            if data:
+                plain_body = base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
+        elif mime == "text/html":
+            data = part.get("body", {}).get("data", "")
+            if data:
+                html_body = base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
+        for sub in part.get("parts", []):
+            _walk(sub)
+
     if "parts" in payload:
         for part in payload["parts"]:
-            if part.get("mimeType") == "text/plain":
-                data = part.get("body", {}).get("data", "")
-                if data:
-                    body = base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
-                    break
+            _walk(part)
     else:
         data = payload.get("body", {}).get("data", "")
         if data:
-            body = base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
-    return body.strip()
+            raw = base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
+            if payload.get("mimeType", "") == "text/html":
+                html_body = raw
+            else:
+                plain_body = raw
+
+    # Prefer plain text; fall back to stripped HTML
+    if plain_body:
+        return _strip_html(plain_body).strip()
+    if html_body:
+        return _strip_html(html_body).strip()
+    return ""
 
 
 def _get_header(headers: list, name: str) -> str:
@@ -73,7 +110,6 @@ async def fetch_new_emails(user: dict) -> list[dict]:
         logger.info(f"User {user['id']} has no Gmail token yet")
         return []
 
-    # Decrypt stored token
     try:
         token_data = json.loads(decrypt_token(prefs["gmail_token"]))
     except Exception as e:
@@ -82,10 +118,8 @@ async def fetch_new_emails(user: dict) -> list[dict]:
 
     creds = _build_credentials(token_data)
 
-    # Refresh token if expired
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
-        # Save refreshed token back to DB
         token_data["access_token"] = creds.token
         await db_update(
             "notification_prefs",
@@ -95,13 +129,11 @@ async def fetch_new_emails(user: dict) -> list[dict]:
 
     service = build("gmail", "v1", credentials=creds, cache_discovery=False)
 
-    # Build query — fetch since last known history ID, or last 24h
     last_history_id = prefs.get("last_gmail_id")
     query = "is:unread"
 
     try:
         if last_history_id:
-            # Use Gmail history API for incremental fetch (efficient)
             history_response = service.users().history().list(
                 userId="me",
                 startHistoryId=last_history_id,
@@ -112,7 +144,6 @@ async def fetch_new_emails(user: dict) -> list[dict]:
                 for msg in record.get("messagesAdded", []):
                     message_ids.append(msg["message"]["id"])
         else:
-            # First-time fetch: last 50 unread emails
             result = service.users().messages().list(
                 userId="me", q=query, maxResults=50
             ).execute()
@@ -137,13 +168,11 @@ async def fetch_new_emails(user: dict) -> list[dict]:
             subject = _get_header(headers, "Subject")
             date_str = _get_header(headers, "Date")
 
-            # Parse sender domain
             sender_domain = ""
             if "<" in sender and "@" in sender:
                 email_addr = sender.split("<")[-1].rstrip(">")
                 sender_domain = email_addr.split("@")[-1] if "@" in email_addr else ""
 
-            # Parse received date
             try:
                 received_at = email_lib.utils.parsedate_to_datetime(date_str)
             except Exception:
@@ -156,13 +185,12 @@ async def fetch_new_emails(user: dict) -> list[dict]:
                 "sender": sender,
                 "sender_domain": sender_domain,
                 "subject": subject,
-                "body_text": body[:5000],  # Cap at 5000 chars
+                "body_text": body[:5000],
                 "received_at": received_at.isoformat(),
                 "category": "uncategorized",
                 "urgency": "low",
             })
 
-            # Track latest history ID
             msg_history_id = msg.get("historyId")
             if msg_history_id:
                 new_history_id = msg_history_id
@@ -171,7 +199,6 @@ async def fetch_new_emails(user: dict) -> list[dict]:
             logger.error(f"Failed to parse email {msg_id}: {e}")
             continue
 
-    # Save new history ID for next incremental poll
     if new_history_id != last_history_id:
         await db_update(
             "notification_prefs",
