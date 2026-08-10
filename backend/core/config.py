@@ -8,33 +8,33 @@ class Settings(BaseSettings):
     # ── App ────────────────────────────────────────────────────────
     APP_NAME: str = "Campus Digest API"
     DEBUG: bool = False
-    SECRET_KEY: str                     # openssl rand -hex 32
+    SECRET_KEY: str = "default_secret_key_change_in_production"
 
     # ── Supabase ───────────────────────────────────────────────────
-    SUPABASE_URL: str
-    SUPABASE_ANON_KEY: str
-    SUPABASE_SERVICE_ROLE_KEY: str
+    SUPABASE_URL: str = ""
+    SUPABASE_ANON_KEY: str = ""
+    SUPABASE_SERVICE_ROLE_KEY: str = ""
 
     # ── Frontend ──────────────────────────────────────────────────
     FRONTEND_URL: str = "http://localhost:3000"
 
     # ── Google OAuth + APIs ────────────────────────────────────────
-    GOOGLE_CLIENT_ID: str
-    GOOGLE_CLIENT_SECRET: str
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
     GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/auth/callback"
 
     # ── Telegram ──────────────────────────────────────────────────
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_API_ID: int = 0
     TELEGRAM_API_HASH: str = ""
-    TELEGRAM_GROUP_ID: int = 0              # Numeric ID of your college group
+    TELEGRAM_GROUP_ID: int = 0
 
     # ── Firebase FCM ──────────────────────────────────────────────
     FIREBASE_CREDENTIALS_PATH: str = "firebase-credentials.json"
 
     # ── Upstash Redis ─────────────────────────────────────────────
-    UPSTASH_REDIS_URL: str
-    UPSTASH_REDIS_TOKEN: str
+    UPSTASH_REDIS_URL: str = ""
+    UPSTASH_REDIS_TOKEN: str = ""
 
     # ── ML ────────────────────────────────────────────────────────
     ML_CLASSIFIER_PATH: str = "ml/models/classifier.pkl"
