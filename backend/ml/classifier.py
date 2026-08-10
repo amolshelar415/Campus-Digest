@@ -1,8 +1,6 @@
-"""
-ML Classifier — TF-IDF + Logistic Regression
-Classifies college emails/messages into 4 categories.
-Lightweight enough to run in 256MB RAM (Fly.io free tier).
-"""
+import logging
+import os
+
 try:
     import joblib
     from sklearn.pipeline import Pipeline

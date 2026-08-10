@@ -1,18 +1,34 @@
+import logging
 from supabase import create_client, Client
 from core.config import settings
 
-# Supabase client — service role (bypasses RLS for server-side ops)
-# We enforce data isolation manually via user_id filters
+logger = logging.getLogger(__name__)
+
 _supabase: Client | None = None
 
 
 def get_db() -> Client:
     global _supabase
     if _supabase is None:
-        _supabase = create_client(
-            settings.SUPABASE_URL,
-            settings.SUPABASE_SERVICE_ROLE_KEY,
-        )
+        url = settings.SUPABASE_URL.strip().strip('"').strip("'")
+        key = settings.SUPABASE_SERVICE_ROLE_KEY.strip().strip('"').strip("'")
+        anon_key = settings.SUPABASE_ANON_KEY.strip().strip('"').strip("'")
+
+        if not key:
+            key = anon_key
+
+        if not url or not key:
+            raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_ANON_KEY) must be configured.")
+
+        try:
+            _supabase = create_client(url, key)
+        except Exception as e:
+            logger.warning(f"[DB] Failed to init Supabase with service role key: {e}. Trying anon key...")
+            if anon_key and anon_key != key:
+                _supabase = create_client(url, anon_key)
+            else:
+                raise e
+
     return _supabase
 
 
@@ -58,4 +74,4 @@ async def db_keepalive():
     """Prevents Supabase free-tier from pausing (runs every 3 days)."""
     db = get_db()
     db.table("users").select("id").limit(1).execute()
-    print("[DB] Supabase keepalive ping sent ✓")
+    logger.info("[DB] Supabase keepalive ping sent ✓")
