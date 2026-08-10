@@ -3,6 +3,7 @@ Auth API Router
 Handles Google OAuth login flow and JWT issuance.
 """
 import json
+import logging
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from google_auth_oauthlib.flow import Flow
@@ -12,6 +13,7 @@ from core.config import settings
 from core.security import create_access_token, encrypt_token
 from core.db import db_select, db_upsert
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 SCOPES = [
@@ -22,20 +24,19 @@ SCOPES = [
     "https://www.googleapis.com/auth/calendar.events",
 ]
 
-CLIENT_CONFIG = {
-    "web": {
-        "client_id": settings.GOOGLE_CLIENT_ID,
-        "client_secret": settings.GOOGLE_CLIENT_SECRET,
-        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-        "token_uri": "https://oauth2.googleapis.com/token",
-        "redirect_uris": [settings.GOOGLE_REDIRECT_URI],
-    }
-}
-
 
 def _build_flow() -> Flow:
+    client_config = {
+        "web": {
+            "client_id": settings.GOOGLE_CLIENT_ID,
+            "client_secret": settings.GOOGLE_CLIENT_SECRET,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [settings.GOOGLE_REDIRECT_URI],
+        }
+    }
     return Flow.from_client_config(
-        CLIENT_CONFIG,
+        client_config,
         scopes=SCOPES,
         redirect_uri=settings.GOOGLE_REDIRECT_URI,
     )
@@ -76,19 +77,25 @@ async def oauth_callback(code: str, request: Request):
         avatar = id_info.get("picture", "")
 
     except Exception as e:
+        logger.error(f"[OAuth] Code exchange failed: {e}")
         raise HTTPException(status_code=400, detail=f"OAuth error: {e}")
 
     # Upsert user record
-    user = await db_upsert("users", {
-        "email": email,
-        "name": name,
-        "avatar_url": avatar,
-    }, on_conflict="email")
+    try:
+        user = await db_upsert("users", {
+            "email": email,
+            "name": name,
+            "avatar_url": avatar,
+        }, on_conflict="email")
+    except Exception as e:
+        logger.error(f"[OAuth] User db_upsert failed: {e}")
+        user = None
 
     if not user:
         # Fetch existing user
         users = await db_select("users", filters={"email": email})
         if not users:
+            logger.error(f"[OAuth] Failed to retrieve or create user for {email}")
             raise HTTPException(status_code=500, detail="User creation failed")
         user = users[0]
 
@@ -99,16 +106,19 @@ async def oauth_callback(code: str, request: Request):
         "client_id": settings.GOOGLE_CLIENT_ID,
         "client_secret": settings.GOOGLE_CLIENT_SECRET,
     }
-    await db_upsert("notification_prefs", {
-        "user_id": user["id"],
-        "gmail_token": encrypt_token(json.dumps(token_data)),
-    }, on_conflict="user_id")
+    try:
+        await db_upsert("notification_prefs", {
+            "user_id": user["id"],
+            "gmail_token": encrypt_token(json.dumps(token_data)),
+        }, on_conflict="user_id")
+    except Exception as e:
+        logger.error(f"[OAuth] notification_prefs db_upsert failed: {e}")
 
     # Issue our JWT
     access_token = create_access_token({"sub": user["id"], "email": email})
 
-    # Redirect frontend with token (or return JSON for API clients)
-    frontend_url = settings.FRONTEND_URL
+    # Redirect frontend with token
+    frontend_url = settings.FRONTEND_URL.rstrip("/")
     return RedirectResponse(
         url=f"{frontend_url}/auth/callback?token={access_token}"
     )
@@ -117,10 +127,6 @@ async def oauth_callback(code: str, request: Request):
 @router.get("/me")
 async def get_me(request: Request):
     """Return current user info from JWT."""
-    from fastapi.security import HTTPBearer
-    from core.dependencies import get_current_user
-    from fastapi import Depends
-    # This is used by frontend to verify session on load
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Not authenticated")
