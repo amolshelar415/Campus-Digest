@@ -12,7 +12,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from core.config import settings
-from api import auth, messages
+from api import auth, messages, calendar, user_settings
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,7 +28,6 @@ async def lifespan(app: FastAPI):
     """App startup: init scheduler. Shutdown: stop scheduler."""
     logger.info("🚀 Campus Digest API starting up...")
 
-    # Import jobs here to avoid circular imports
     from notifications.scheduler_jobs import (
         poll_all_users,
         send_morning_digest,
@@ -36,7 +35,6 @@ async def lifespan(app: FastAPI):
         keepalive_supabase,
     )
 
-    # ── Schedule all background jobs ─────────────────────────────────
     scheduler.add_job(
         poll_all_users,
         IntervalTrigger(minutes=settings.POLL_INTERVAL_MINUTES),
@@ -81,29 +79,38 @@ app = FastAPI(
     version="1.0.0",
     description="Smart Academic Notification Aggregator — Backend API",
     lifespan=lifespan,
-    docs_url="/docs" if settings.DEBUG else None,   # Hide docs in production
-    redoc_url=None,
+    docs_url="/docs",    # Always show docs so you can test endpoints
+    redoc_url="/redoc",
 )
 
 # ── CORS ──────────────────────────────────────────────────────────────
+# Allow any Vercel preview URL, localhost, and your production frontend
+frontend_url = settings.FRONTEND_URL.rstrip("/")
+allowed_origins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "https://campus-digest.vercel.app",
+    frontend_url,
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "https://campus-digest.vercel.app",
-        # Add your Vercel preview URLs here too
-    ],
+    allow_origins=allowed_origins,
+    allow_origin_regex=r"https://campus-digest.*\.vercel\.app",  # all Vercel previews
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "DELETE"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
+    expose_headers=["Content-Type"],
 )
 
 # ── Routers ───────────────────────────────────────────────────────────
-app.include_router(auth.router,     prefix="/api/auth",     tags=["Auth"])
-app.include_router(messages.router, prefix="/api/messages", tags=["Messages"])
+app.include_router(auth.router,          prefix="/api/auth",     tags=["Auth"])
+app.include_router(messages.router,     prefix="/api/messages",  tags=["Messages"])
+app.include_router(calendar.router,     prefix="/api/calendar",  tags=["Calendar"])
+app.include_router(user_settings.router, prefix="/api/user",     tags=["User"])
 
 
-# ── Health check (Fly.io uses this) ──────────────────────────────────
+# ── Health check ──────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
     return {"status": "ok", "version": "1.0.0"}
@@ -111,7 +118,7 @@ async def health():
 
 @app.get("/")
 async def root():
-    return {"app": "Campus Digest API", "status": "running"}
+    return {"app": "Campus Digest API", "status": "running", "docs": "/docs"}
 
 
 if __name__ == "__main__":

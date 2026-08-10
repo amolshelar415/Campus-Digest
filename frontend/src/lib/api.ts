@@ -1,6 +1,6 @@
 /**
  * Campus Digest — API Client
- * Talks to the FastAPI backend at NEXT_PUBLIC_API_URL
+ * All calls to the FastAPI backend at NEXT_PUBLIC_API_URL
  */
 
 const API = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api").replace(/\/$/, "");
@@ -22,10 +22,14 @@ export function removeAuthToken(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
 
+export function isLoggedIn(): boolean {
+  return !!getAuthToken();
+}
+
 // ── Generic fetch ────────────────────────────────────────────────────
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T | null> {
   const token = getAuthToken();
-  const headers: HeadersInit = {
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(options.headers as Record<string, string> || {}),
@@ -65,53 +69,45 @@ export async function fetchCurrentUser(): Promise<UserProfile | null> {
   return apiFetch<UserProfile>("/auth/me");
 }
 
-export async function exchangeCodeForToken(code: string, state: string): Promise<{ access_token: string } | null> {
-  const params = new URLSearchParams({ code, state });
-  return apiFetch<{ access_token: string }>(`/auth/callback?${params.toString()}`);
+export function getLoginUrl(): string {
+  return `${API}/auth/login`;
 }
 
 // ── Messages / Board ─────────────────────────────────────────────────
+export interface ApiMessage {
+  id: string;
+  user_id: string;
+  source: "gmail" | "telegram";
+  category: "placement" | "faculty" | "department" | "spam";
+  urgency: "high" | "medium" | "low";
+  sender: string;
+  subject: string;
+  body_text: string;
+  received_at: string;
+  deadline: string | null;
+  is_read: boolean;
+  is_dismissed: boolean;
+  calendar_event_id: string | null;
+  confidence?: number;
+}
+
 export interface BoardResponse {
-  today: unknown[];
-  week: unknown[];
-  later: unknown[];
-  flagged: unknown[];
-  [key: string]: unknown[];
+  today: ApiMessage[];
+  week: ApiMessage[];
+  later: ApiMessage[];
+  flagged: ApiMessage[];
 }
 
 export async function fetchBoard(): Promise<BoardResponse | null> {
   return apiFetch<BoardResponse>("/messages/board");
 }
 
-export async function fetchMessages(params?: {
-  category?: string;
-  urgency?: string;
-  search?: string;
-  page?: number;
-  limit?: number;
-}): Promise<unknown[] | null> {
-  const q = new URLSearchParams();
-  if (params?.category) q.set("category", params.category);
-  if (params?.urgency)  q.set("urgency",  params.urgency);
-  if (params?.search)   q.set("search",   params.search);
-  if (params?.page)     q.set("page",     String(params.page));
-  if (params?.limit)    q.set("limit",    String(params.limit));
-  const qs = q.toString();
-  return apiFetch<unknown[]>(`/messages${qs ? `?${qs}` : ""}`);
+export async function markAsRead(id: string): Promise<void> {
+  await apiFetch<unknown>(`/messages/${id}/read`, { method: "POST" });
 }
 
-export async function fetchMessage(id: string): Promise<unknown | null> {
-  return apiFetch<unknown>(`/messages/${id}`);
-}
-
-export async function markAsRead(id: string): Promise<boolean> {
-  const res = await apiFetch<unknown>(`/messages/${id}/read`, { method: "POST" });
-  return res !== null;
-}
-
-export async function dismissMessage(id: string): Promise<boolean> {
-  const res = await apiFetch<unknown>(`/messages/${id}/dismiss`, { method: "POST" });
-  return res !== null;
+export async function dismissMessage(id: string): Promise<void> {
+  await apiFetch<unknown>(`/messages/${id}/dismiss`, { method: "POST" });
 }
 
 // ── Feedback ─────────────────────────────────────────────────────────
@@ -120,19 +116,38 @@ export async function submitFeedback(
   correctedCategory: string,
   feedbackType: "wrong_category" | "mark_spam" | "not_spam" = "wrong_category"
 ): Promise<boolean> {
-  const res = await apiFetch<unknown>("/feedback", {
+  const res = await apiFetch<unknown>(`/messages/${messageId}/feedback`, {
     method: "POST",
-    body: JSON.stringify({ message_id: messageId, corrected_category: correctedCategory, feedback_type: feedbackType }),
+    body: JSON.stringify({
+      corrected_category: correctedCategory,
+      feedback_type: feedbackType,
+      message_id: messageId,
+    }),
   });
   return res !== null;
 }
 
 // ── Calendar ─────────────────────────────────────────────────────────
-export async function addToCalendar(messageId: string): Promise<unknown | null> {
-  return apiFetch<unknown>("/calendar/add", {
-    method: "POST",
-    body: JSON.stringify({ message_id: messageId }),
-  });
+export interface CalendarEvent {
+  id: string;
+  summary: string;
+  start: { dateTime?: string; date?: string };
+  end: { dateTime?: string; date?: string };
+  htmlLink: string;
+}
+
+export async function addToCalendar(
+  messageId: string
+): Promise<{ status: string; event_id?: string; event_link?: string; summary?: string } | null> {
+  return apiFetch<{ status: string; event_id?: string; event_link?: string; summary?: string }>(
+    "/calendar/add",
+    { method: "POST", body: JSON.stringify({ message_id: messageId }) }
+  );
+}
+
+export async function getCalendarEvents(): Promise<CalendarEvent[]> {
+  const res = await apiFetch<{ events: CalendarEvent[] }>("/calendar/events");
+  return res?.events ?? [];
 }
 
 // ── User Settings ────────────────────────────────────────────────────
@@ -145,6 +160,8 @@ export interface NotificationPrefs {
   dnd_start?: string;
   dnd_end?: string;
   digest_time?: string;
+  gmail_connected?: boolean;
+  calendar_connected?: boolean;
 }
 
 export async function fetchUserSettings(): Promise<NotificationPrefs | null> {
@@ -159,7 +176,14 @@ export async function updateUserSettings(prefs: Partial<NotificationPrefs>): Pro
   return res !== null;
 }
 
-// ── Analytics ────────────────────────────────────────────────────────
-export async function fetchAnalytics(): Promise<unknown | null> {
-  return apiFetch<unknown>("/analytics");
+export async function registerFCMToken(token: string): Promise<boolean> {
+  const res = await apiFetch<unknown>("/user/fcm-token", {
+    method: "POST",
+    body: JSON.stringify({ fcm_token: token }),
+  });
+  return res !== null;
+}
+
+export async function triggerPollNow(): Promise<{ status: string; message: string } | null> {
+  return apiFetch<{ status: string; message: string }>("/user/poll-now", { method: "POST" });
 }

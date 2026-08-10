@@ -15,6 +15,7 @@ router = APIRouter()
 class FeedbackRequest(BaseModel):
     corrected_category: str
     feedback_type: str  # "wrong_category" | "mark_spam" | "not_spam"
+    message_id: str | None = None  # for /feedback shortcut endpoint
 
 
 @router.get("/")
@@ -47,7 +48,6 @@ async def list_messages(
     if is_read is not None:
         query = query.eq("is_read", is_read)
     if search:
-        # Basic substring search on subject + sender
         query = query.or_(f"subject.ilike.%{search}%,sender.ilike.%{search}%")
 
     result = query.execute()
@@ -70,12 +70,7 @@ async def get_board(user: dict = Depends(get_current_user)):
               .execute())
 
     messages = result.data or []
-    board = {
-        "today": [],
-        "week": [],
-        "later": [],
-        "flagged": [],
-    }
+    board = {"today": [], "week": [], "later": [], "flagged": []}
     for msg in messages:
         cat = msg.get("category")
         urg = msg.get("urgency")
@@ -122,7 +117,9 @@ async def get_message(message_id: str, user: dict = Depends(get_current_user)):
     return result.data[0]
 
 
+# Both PATCH and POST supported for mark-read (frontend uses POST, keeping PATCH too)
 @router.patch("/{message_id}/read")
+@router.post("/{message_id}/read")
 async def mark_read(message_id: str, user: dict = Depends(get_current_user)):
     await db_update("messages",
                     match={"id": message_id, "user_id": user["id"]},
@@ -132,6 +129,7 @@ async def mark_read(message_id: str, user: dict = Depends(get_current_user)):
 
 
 @router.patch("/{message_id}/dismiss")
+@router.post("/{message_id}/dismiss")
 async def dismiss(message_id: str, user: dict = Depends(get_current_user)):
     await db_update("messages",
                     match={"id": message_id, "user_id": user["id"]},
@@ -141,7 +139,7 @@ async def dismiss(message_id: str, user: dict = Depends(get_current_user)):
 
 
 @router.post("/{message_id}/feedback")
-async def submit_feedback(
+async def submit_feedback_on_message(
     message_id: str,
     body: FeedbackRequest,
     user: dict = Depends(get_current_user),
@@ -156,8 +154,31 @@ async def submit_feedback(
         "corrected_category": body.corrected_category,
         "feedback_type": body.feedback_type,
     })
-    # Also update the message's category immediately for UI consistency
     await db_update("messages",
                     match={"id": message_id, "user_id": user["id"]},
+                    data={"category": body.corrected_category})
+    return {"status": "feedback recorded"}
+
+
+# Global /feedback shortcut (frontend can POST to either place)
+@router.post("/feedback")
+async def submit_feedback_global(
+    body: FeedbackRequest,
+    user: dict = Depends(get_current_user),
+):
+    """Shortcut feedback endpoint — same as /{message_id}/feedback."""
+    if not body.message_id:
+        raise HTTPException(status_code=400, detail="message_id required")
+    if body.corrected_category not in ["placement", "faculty", "department", "spam"]:
+        raise HTTPException(status_code=400, detail="Invalid category")
+
+    await db_insert("feedback", {
+        "user_id": user["id"],
+        "message_id": body.message_id,
+        "corrected_category": body.corrected_category,
+        "feedback_type": body.feedback_type,
+    })
+    await db_update("messages",
+                    match={"id": body.message_id, "user_id": user["id"]},
                     data={"category": body.corrected_category})
     return {"status": "feedback recorded"}
