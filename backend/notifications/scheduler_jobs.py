@@ -89,11 +89,11 @@ async def poll_all_users():
                     now = datetime.now(timezone.utc)
                     hour = now.hour
 
-                    # DND check
+                    # DND check (safely handle str or time object)
                     dnd_start = prefs.get("dnd_start", "23:00")
                     dnd_end = prefs.get("dnd_end", "08:00")
-                    dnd_start_h = int(dnd_start.split(":")[0]) if dnd_start else 23
-                    dnd_end_h = int(dnd_end.split(":")[0]) if dnd_end else 8
+                    dnd_start_h = int(str(dnd_start).split(":")[0]) if dnd_start else 23
+                    dnd_end_h = int(str(dnd_end).split(":")[0]) if dnd_end else 8
                     in_dnd = (hour >= dnd_start_h) or (hour < dnd_end_h)
 
                     if not in_dnd:

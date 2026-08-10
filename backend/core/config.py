@@ -15,16 +15,19 @@ class Settings(BaseSettings):
     SUPABASE_ANON_KEY: str
     SUPABASE_SERVICE_ROLE_KEY: str
 
+    # ── Frontend ──────────────────────────────────────────────────
+    FRONTEND_URL: str = "http://localhost:3000"
+
     # ── Google OAuth + APIs ────────────────────────────────────────
     GOOGLE_CLIENT_ID: str
     GOOGLE_CLIENT_SECRET: str
     GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/auth/callback"
 
     # ── Telegram ──────────────────────────────────────────────────
-    TELEGRAM_BOT_TOKEN: str
-    TELEGRAM_API_ID: int
-    TELEGRAM_API_HASH: str
-    TELEGRAM_GROUP_ID: int              # Numeric ID of your college group
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_API_ID: int = 0
+    TELEGRAM_API_HASH: str = ""
+    TELEGRAM_GROUP_ID: int = 0              # Numeric ID of your college group
 
     # ── Firebase FCM ──────────────────────────────────────────────
     FIREBASE_CREDENTIALS_PATH: str = "firebase-credentials.json"

@@ -12,9 +12,14 @@ logger = logging.getLogger(__name__)
 _initialized = False
 
 
+import os
+
 def _init_firebase():
     global _initialized
     if not _initialized:
+        if not os.path.exists(settings.FIREBASE_CREDENTIALS_PATH):
+            logger.warning(f"Firebase credentials file not found at {settings.FIREBASE_CREDENTIALS_PATH}. Push notifications disabled.")
+            return
         try:
             cred = credentials.Certificate(settings.FIREBASE_CREDENTIALS_PATH)
             firebase_admin.initialize_app(cred)

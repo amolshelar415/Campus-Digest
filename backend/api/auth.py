@@ -108,7 +108,7 @@ async def oauth_callback(code: str, request: Request):
     access_token = create_access_token({"sub": user["id"], "email": email})
 
     # Redirect frontend with token (or return JSON for API clients)
-    frontend_url = "http://localhost:3000"
+    frontend_url = settings.FRONTEND_URL
     return RedirectResponse(
         url=f"{frontend_url}/auth/callback?token={access_token}"
     )
