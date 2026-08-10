@@ -1,0 +1,47 @@
+# ── Web Framework ──────────────────────────────────────────────────
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
+
+# ── Database ────────────────────────────────────────────────────────
+supabase==2.7.4
+sqlalchemy==2.0.35
+asyncpg==0.29.0
+
+# ── Auth & Security ─────────────────────────────────────────────────
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+cryptography==43.0.1
+google-auth==2.35.0
+google-auth-oauthlib==1.2.1
+google-auth-httplib2==0.2.0
+
+# ── Google APIs ─────────────────────────────────────────────────────
+google-api-python-client==2.149.0
+
+# ── Telegram ────────────────────────────────────────────────────────
+telethon==1.36.0           # Read Telegram groups (MTProto)
+python-telegram-bot==21.6  # Send bot messages
+
+# ── ML / NLP ────────────────────────────────────────────────────────
+scikit-learn==1.5.2
+numpy==1.26.4
+joblib==1.4.2
+spacy==3.7.6
+dateparser==1.2.0
+
+# ── Task Scheduling ──────────────────────────────────────────────────
+apscheduler==3.10.4
+
+# ── HTTP Client ─────────────────────────────────────────────────────
+httpx==0.27.2
+
+# ── Utilities ────────────────────────────────────────────────────────
+pydantic==2.9.2
+pydantic-settings==2.5.2
+python-dotenv==1.0.1
+fuzzywuzzy==0.18.0
+python-Levenshtein==0.25.1   # speeds up fuzzywuzzy
+
+# ── Firebase (FCM push notifications) ────────────────────────────────
+firebase-admin==6.5.0

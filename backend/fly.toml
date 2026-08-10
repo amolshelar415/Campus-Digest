@@ -1,0 +1,40 @@
+app = "campus-digest-api"
+primary_region = "sin"        # Singapore — closest to India
+
+[build]
+  builder = "paketobuildpacks/builder:base"
+  buildpacks = ["gcr.io/buildpacks/builder:v1"]
+
+[env]
+  PORT = "8080"
+  PYTHONUNBUFFERED = "1"
+  DEBUG = "False"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false      # Keep always on (free tier allows this)
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 25
+    hard_limit = 50
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256               # Free tier — enough for sklearn
+
+[[statics]]
+  # No static files — frontend is on Vercel
+
+# Health check so Fly.io knows the app is running
+[[services.http_checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "30s"
+  method = "GET"
+  path = "/health"
+  protocol = "http"
